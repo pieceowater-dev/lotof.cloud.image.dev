@@ -1,1 +1,1 @@
-# -lotof.cloud.image.dev
+# lotof.cloud.image.dev
