@@ -1,0 +1,96 @@
+---
+- name: Reinstall Docker and Docker Compose on Amazon Linux 2023 with Auto-Update
+  hosts: all
+  become: true
+  vars_files:
+    - dockerhub_credentials.yml
+
+  tasks:
+    - name: Check for and apply release updates
+      shell: |
+        dnf check-release-update && dnf update -y
+      ignore_errors: true
+
+    - name: Ensure the system is up to date
+      yum:
+        name: "*"
+        state: latest
+
+    - name: Check if Docker is installed
+      command: rpm -q docker
+      register: docker_installed
+      ignore_errors: true
+
+    - name: Stop and disable Docker service
+      systemd:
+        name: docker
+        enabled: no
+        state: stopped
+      when: docker_installed.rc == 0
+
+    - name: Remove Docker packages
+      yum:
+        name:
+          - docker
+          - docker-client
+          - docker-client-latest
+          - docker-common
+          - docker-latest
+          - docker-latest-logrotate
+          - docker-logrotate
+          - docker-engine
+        state: absent
+
+    - name: Remove Docker Compose binary
+      file:
+        path: /usr/local/bin/docker-compose
+        state: absent
+
+    - name: Clean up Docker directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      with_items:
+        - /var/lib/docker
+        - /etc/docker
+        - /var/run/docker
+        - /var/log/docker
+
+    - name: Install Docker using dnf
+      dnf:
+        name: docker
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add ec2-user to Docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Ensure Docker Compose directory exists
+      file:
+        path: /usr/local/bin/
+        state: directory
+
+    - name: Download and install the latest Docker Compose
+      shell: |
+        curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+
+    - name: Verify Docker Compose installation
+      command: docker-compose version
+      register: compose_version
+
+    - debug:
+        msg: "Docker Compose version: {{ compose_version.stdout }}"
+
+    - name: Reboot the instance to apply group changes
+      reboot:
+        msg: "Rebooting to apply user group changes..."
+      when: docker_installed.changed
